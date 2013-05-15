@@ -31,29 +31,97 @@ def uniformMap(ip):
     else:
         return ".".join( ip.split(".")[:3] )
 
-def getNumBridgesPerAnswer(ring, max_bridges_per_answer=3):
-    if len(ring) < 20: n_bridges_per_answer = 1
-    if 20 <= len(ring) < 100: n_bridges_per_answer = min(2, max_bridges_per_answer)
-    if len(ring) >= 100: n_bridges_per_answer = max_bridges_per_answer
+def getNumBridgesPerAnswer(ring, max_bridges_per_answer=4):
+    """
+    Determine how many bridges we can safely retrieve from the ring 
+    
+    Based on the size of the ring. If:
+               len(ring) <   20 : return 1 bridge
+         20 <= len(ring) <  100 : return 2 bridges
+        100 <= len(ring) <  150 : return 3 bridgse
+               len(ring) >= 150 : return 4 bridgse
 
-    logging.debug("Returning %d bridges from ring of len: %d" % \
-            (n_bridges_per_answer, len(ring)))
+    :param bridgedb.Bridges.BridgeRing ring: Ring from which we must
+        determine the appropriate number of bridges to return
+    :param int max_bridges_per_answer: Requested number of bridges to
+        be returned.
+    """
+
+    if len(ring) < 20:
+        n_bridges_per_answer = 1
+        logging.debug("Returning %d bridges out of an expected %d " \
+                "from ring of len: %d" % \
+                (n_bridges_per_answer, max_bridges_per_answer, len(ring)))
+    if 20 <= len(ring) < 100:
+        n_bridges_per_answer = min(2, max_bridges_per_answer)
+        logging.debug("Returning %d bridges out of an expected %d " \
+                "from ring of len: %d" % \
+                (n_bridges_per_answer, max_bridges_per_answer, len(ring)))
+    if 100 <= len(ring) < 150:
+        n_bridges_per_answer = min(3, max_bridges_per_answer)
+        logging.debug("Returning %d bridges out of an expected %d " \
+                "from ring of len: %d" % \
+                (n_bridges_per_answer, max_bridges_per_answer, len(ring)))
+    if len(ring) >= 150:
+        n_bridges_per_answer = min(4, max_bridges_per_answer)
+        logging.debug("Returning %d bridges from ring of len: %d" % \
+                (n_bridges_per_answer, len(ring)))
     return n_bridges_per_answer
 
 class IPBasedDistributor(bridgedb.Bridges.BridgeHolder):
-    """Object that hands out bridges based on the IP address of an incoming
-       request and the current time period.
+
     """
-    ## Fields:
-    ##    areaMapper -- a function that maps an IP address to a string such
-    ##        that addresses mapping to the same string are in the same "area".
-    ##    rings -- a list of BridgeRing objects.  Every bridge goes into one
-    ##        of these rings, and every area is associated with one.
-    ##    splitter -- a FixedBridgeSplitter to assign bridges into the
-    ##        rings of this distributor.
-    ##    areaOrderHmac -- an hmac function used to order areas within rings.
-    ##    areaClusterHmac -- an hmac function used to assign areas to rings.
+    Object that hands out bridges based on the IP address of an incoming
+       request and the current time period.
+
+    :attr bridgedb.Bridges.BridgeRingParameters answerParameters: Dictate which
+        qualities we wish a bridge to process.
+    :attr function areaClusterHmac: Calculate HMAC of requesting IP address's
+        area to assign it to the correct rings.
+    :attr function areaMapper: Maps an IP address to a string such that
+        addresses mapping to the same string are in the same "area".
+    :attr function areaOrderHmac: Calculates HMAC of area to order them within
+        rings.
+    :attr list categories: IP addresses that should be treated in a special way.
+        ex. Known proxy addresses.
+    :attr int nClusters: The number of clusters into which we will divide the
+        address space. Areas will then be mapped into one of these clusters.
+    :attr list rings: Containing instances of bridgedb.Bridges.BridgeRing.
+        Every bridge assigned to this distributor goes into one of these rings,
+        and every area is associated with one.
+    :attr bridgedb.Bridges.FilterBridgeSplitter splitter: Assigns bridges into
+        the rings of this distributor.
+
+    :mathod prepopulateRings: Create and fill rings based on defined categories
+        and clusters.
+    :method clear: Remove all bridges from splitter's rings.
+    :method insert: Insert bridge into splitter's rings.
+    :method list getBridgesForIP: Return bridges based on requesting IP address
+        and user provided criteria.
+    :method dumpAssignment: Write to file a description of all bridges we've
+        been assigned each time it passes one of the filters.
+
+    """
+
     def __init__(self, areaMapper, nClusters, key, ipCategories=(), answerParameters=None):
+        """
+        Initialize instance variables
+
+        Obtain values and closures that will be necessary for bridge
+        assignment and retrieval.
+
+        :param function areaMapper: Define how an IP address will be mapped
+            to an area.
+        :param int nClusters: Define the number of clusters into which we
+            will divide the IP address space.
+        :param str key: Master key used to derive subkeys used in HMAC
+            functions
+        :param list ipCategories: IP addresses that should be treated in a
+            special way.
+            ex. Known proxy addresses
+        :param bridgedb.Bridges.BridgeRingParameters answerParameters: Dictate
+            which qualities we wish a bridge to process.
+        """
         self.areaMapper = areaMapper
         self.nClusters = nClusters
         self.answerParameters = answerParameters
@@ -79,7 +147,12 @@ class IPBasedDistributor(bridgedb.Bridges.BridgeHolder):
         logging.debug("added splitter %s" % self.splitter)
 
     def prepopulateRings(self):
-        # populate all rings (for dumping assignments and testing)
+        """
+        Populate all rings
+
+        Used for ring initialization and for dumping assignments and testing
+        """
+
         for filterFn in [None, filterBridgesByIP4, filterBridgesByIP6]:
             n = self.nClusters
             for category in self.categories:
@@ -116,6 +189,7 @@ class IPBasedDistributor(bridgedb.Bridges.BridgeHolder):
                                       populate_from=self.splitter.bridges)
 
     def clear(self):
+        """ Empty all rings """
         self.splitter.clear()
 
     def insert(self, bridge):
@@ -124,11 +198,22 @@ class IPBasedDistributor(bridgedb.Bridges.BridgeHolder):
 
     def getBridgesForIP(self, ip, epoch, N=1, countryCode=None,
                         bridgeFilterRules=None):
-        """Return a list of bridges to give to a user.
-           ip -- the user's IP address, as a dotted quad.
-           epoch -- the time period when we got this request.  This can
-               be any string, so long as it changes with every period.
-           N -- the number of bridges to try to give back.
+        """
+        Return a list of bridges to give to a user.
+
+        Based on the requestors area, filters, and country code (if
+        provided), create a list of qualified bridges.
+
+        :param str ip: the user's IP address, as a dotted quad.
+        :param str epoch: the time period when we received this request.  This
+            can be any string, so long as it changes with every period.
+        :param int N: the number of bridges to try to give back.
+        :param str countryCode: Country code of originating IP address (unused)
+        :param list bridgeFilterRules: Rules set specifying the criteria a bridge
+            must meet if we are to return it.
+
+        :return: List of N quality bridges
+
         """
         if not bridgeFilterRules: bridgeFilterRules=[]
         logging.debug("getBridgesForIP(%s, %s, %s, %s" % (ip, epoch, N, bridgeFilterRules))
@@ -139,7 +224,7 @@ class IPBasedDistributor(bridgedb.Bridges.BridgeHolder):
         area = self.areaMapper(ip)
 
         logging.info("area is %s" % area)
-        
+
         key1 = ''
         pos = 0
         n = self.nClusters
@@ -167,7 +252,7 @@ class IPBasedDistributor(bridgedb.Bridges.BridgeHolder):
             h = int( self.areaClusterHmac(area)[:8], 16)
             # length of numClusters
             clusterNum = h % self.nClusters
- 
+
             g = filterAssignBridgesToRing(self.splitter.hmac,
                                           self.nClusters +
                                           len(self.categories),
@@ -192,11 +277,14 @@ class IPBasedDistributor(bridgedb.Bridges.BridgeHolder):
         else:
             logging.debug("Cache miss %s" % ruleset)
             ring = bridgedb.Bridges.BridgeRing(key1, self.answerParameters)
-            self.splitter.addRing(ring, ruleset, filterBridgesByRules(bridgeFilterRules),
+            self.splitter.addRing(ring, ruleset,
+                                  filterBridgesByRules(bridgeFilterRules),
                                   populate_from=self.splitter.bridges)
 
-        # get an appropriate number of bridges
-        return ring.getBridges(pos, getNumBridgesPerAnswer(ring, max_bridges_per_answer=N))
+        # get an appropriate number of bridges. If we don't know enough of them,
+        # return what we can
+        return ring.getBridges(pos, getNumBridgesPerAnswer(ring,
+                                      max_bridges_per_answer=N))
 
     def __len__(self):
         return len(self.splitter)
@@ -241,9 +329,13 @@ class IgnoreEmail(BadEmail):
     pass 
 
 def extractAddrSpec(addr):
-    """Given an email From line, try to extract and parse the addrspec
-       portion.  Returns localpart,domain on success; raises BadEmail
-       on failure.
+    """
+    Given an email From: line, try to extract and parse the addrspec portion.
+
+    :return: localpart, domain on success
+    
+    :raise:
+      * :class:`bridgedb.Dist.BadEmail` on failure.
     """
     orig_addr = addr
     addr = SPACE_PAT.sub(' ', addr)
@@ -280,9 +372,16 @@ def extractAddrSpec(addr):
     return localpart, domain
 
 def normalizeEmail(addr, domainmap, domainrules):
-    """Given the contents of a from line, and a map of supported email
-       domains (in lowercase), raise BadEmail or return a normalized
-       email address.
+    """
+    Given the contents of a From: line, and a mapping, normalize email address
+    
+    Normalize the email address on the From: line of the email we received
+    using a map of supported email domains (in lowercase).
+    
+    :return: Normalized email address
+
+    :raise:
+      * :class:`bridgedb.Dist.UnsupportedDomain` on error
     """
     addr = addr.lower()
     localpart, domain = extractAddrSpec(addr)
@@ -305,18 +404,58 @@ def normalizeEmail(addr, domainmap, domainrules):
     return "%s@%s"%(localpart, domain)
 
 class EmailBasedDistributor(bridgedb.Bridges.BridgeHolder):
-    """Object that hands out bridges based on the email address of an incoming
-       request and the current time period.
+
     """
-    ## Fields:
-    ##   emailHmac -- an hmac function used to order email addresses within
-    ##       a ring.
-    ##   ring -- a BridgeRing object to hold all the bridges we hand out.
-    ##   store -- a database object to remember what we've given to whom.
-    ##   domainmap -- a map from lowercase domains that we support mail from
-    ##       to their canonical forms.
+    Object that hands out bridges based on the email address of an incoming
+       request and the current time period.
+
+    :attr bridgedb.Bridges.BridgeRingParameters answerParameters: Dictate which
+        qualities we wish a bridge to process.
+    :attr function emailHmac: Calculate HMAC of requesting email address. Result
+        is used to determine from which ring we will retrieve bridges.
+    :attr dict domainmap: A map from lowercase domains that we support
+        mail to their canonical forms.
+    :attr dict domainrules: Map from a canonical domain to list of options for
+        that domain.
+    :attr list categories: IP addresses that should be treated in a special way.
+        ex. Known proxy addresses.
+    :attr int nClusters: The number of clusters into which we will divide the
+        address space. Areas will then be mapped into one of these clusters.
+    :attr list rings: Containing instances of bridgedb.Bridges.BridgeRing.
+        Every bridge assigned to this distributor goes into one of these rings,
+        and every area is associated with one.
+    :attr bridgedb.Bridges.FilterBridgeSplitter splitter: Assigns bridges into
+        the rings of this distributor.
+
+    :mathod prepopulateRings: Create and fill rings based on defined categories
+        and clusters.
+    :method clear: Remove all bridges from splitter's rings.
+    :method insert: Insert bridge into splitter's rings.
+    :method list getBridgesForIP: Return bridges based on requesting IP address
+        and user provided criteria.
+    :method dumpAssignment: Write to file a description of all bridges we've
+        been assigned each time it passes one of the filters.
+
+    """
+
     def __init__(self, key, domainmap, domainrules,
                  answerParameters=None):
+        """
+        Initialize instance variables
+
+        Obtain values and closures that will be necessary for bridge
+        assignment and retrieval.
+
+        :param str key: Master key used to derive subkeys used in HMAC
+            functions
+        :param function domainmap: A map from lowercase domains that we
+            support mail to their canonical forms.
+        :param dict domainrules: Map from a canonical domain to a list of
+            options for that domain. Options are 'ignore_dots', and 'dkim'.
+            ex. Known proxy addresses
+        :param bridgedb.Bridges.BridgeRingParameters answerParameters: Dictate
+            which qualities we wish a bridge to process.
+        """
         key1 = bridgedb.Bridges.get_hmac(key, "Map-Addresses-To-Ring")
         self.emailHmac = bridgedb.Bridges.get_hmac_fn(key1, hex=False)
 
@@ -331,6 +470,7 @@ class EmailBasedDistributor(bridgedb.Bridges.BridgeHolder):
                                                             max_cached_rings=5)
 
     def clear(self):
+        """ Empty all rings """
         self.splitter.clear()
         #self.ring.clear() # should be take care of by above
 
@@ -340,12 +480,31 @@ class EmailBasedDistributor(bridgedb.Bridges.BridgeHolder):
 
     def getBridgesForEmail(self, emailaddress, epoch, N=1,
             parameters=None, countryCode=None, bridgeFilterRules=None):
-        """Return a list of bridges to give to a user.
-           emailaddress -- the user's email address, as given in a from line.
-           epoch -- the time period when we got this request.  This can
-               be any string, so long as it changes with every period.
-           N -- the number of bridges to try to give back.
+	"""
+        Return a list of bridges to give to a user based on specified criteria
+
+        Based on the requestors email address, filters, and country code (if
+        provided), create a list of qualified bridges.
+	
+        :param str emailaddress: the user's email address, as given in a from
+            line.
+        :param str epoch: the time period when we received this request.  This
+            can be any string, so long as it changes with every period.
+        :param int N: the number of bridges to try to give back.
+        :param list parameters: (unused)
+        :param str countryCode: Country code (unused)
+        :param list bridgeFilterRules: Rules set specifying the criteria a
+            bridge must meet if we are to return it.
+
+        :return: List of N quality bridges
+
+        :raise:
+          * :class:`bridgedb.Dist.IgnoreEmail` on receipt of repeat request
+              too soon after last warning.
+          * :class:`bridgedb.Dist.TooSoonEmail` on receipt of repeat request
+              too soon after last response when we provided bridges.
         """
+
         if not bridgeFilterRules:
             bridgeFilterRules=[]
         now = time.time()
@@ -399,11 +558,12 @@ class EmailBasedDistributor(bridgedb.Bridges.BridgeHolder):
                                   filterBridgesByRules(bridgeFilterRules),
                                   populate_from=self.splitter.bridges)
 
-        result = ring.getBridges(pos, getNumBridgesPerAnswer(ring, max_bridges_per_answer=N))
-
         db.setEmailTime(emailaddress, now)
         db.commit()
-        return result
+
+        return ring.getBridges(pos, getNumBridgesPerAnswer(
+                                        ring,
+                                        max_bridges_per_answer=N))
 
     def __len__(self):
         return len(self.splitter)
@@ -423,7 +583,11 @@ class EmailBasedDistributor(bridgedb.Bridges.BridgeHolder):
         self.splitter.dumpAssignments(f, description)
 
     def prepopulateRings(self):
-        # populate all rings (for dumping assignments and testing)
+        """
+        Populate all rings
+
+        Used for ring initialization and for dumping assignments and testing
+        """
         for filterFn in [filterBridgesByIP4, filterBridgesByIP6]:
             ruleset = frozenset([filterFn])
             key1 = bridgedb.Bridges.get_hmac(self.splitter.key,

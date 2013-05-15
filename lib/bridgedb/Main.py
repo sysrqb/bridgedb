@@ -109,7 +109,7 @@ CONFIG = Conf(
   )
 
 def configureLogging(cfg):
-    """Set up Python's logging subsystem based on the configuratino.
+    """Set up Python's logging subsystem based on the configuration.
     """
     level = getattr(cfg, 'LOGLEVEL', 'WARNING')
     level = getattr(logging, level)
@@ -305,10 +305,13 @@ def startup(cfg):
     # Create ring parameters.
     forcePorts = getattr(cfg, "FORCE_PORTS")
     forceFlags = getattr(cfg, "FORCE_FLAGS")
+    forceTrans = getattr(cfg, "FORCE_TRANS")
     if not forcePorts: forcePorts = []
     if not forceFlags: forceFlags = []
+    if not forceTrans: forceTrans = []
     ringParams=Bridges.BridgeRingParameters(needPorts=forcePorts,
-                                            needFlags=forceFlags)
+                                            needFlags=forceFlags,
+                                            needTransports=forceTrans)
 
     emailDistributor = ipDistributor = None
     # As appropriate, create an IP-based distributor.
