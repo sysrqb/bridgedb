@@ -172,7 +172,12 @@ class Bridge:
             if transports:
                 pt = transports[pos % len(transports)]
                 return pt.getTransportLine(includeFingerprint)
-
+        else:
+	    if self.transports:
+                transports = filter(lambda x: isinstance(x.address, addressClass),
+                        self.transports)
+                pt = transports[pos % len(transports)]
+                return pt.getTransportLine(includeFingerprint)
         # filter addresses by address class
         addresses = filter(lambda x: isinstance(x[0], addressClass),
                 self.or_addresses.items())
