@@ -10,6 +10,7 @@ import tempfile
 import unittest
 import warnings
 import time
+import itertools
 from datetime import datetime
 
 import bridgedb.Bridges

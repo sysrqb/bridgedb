@@ -422,6 +422,12 @@ re_ipv4 = re.compile("((?:\d{1,3}\.?){4}):(.*$)")
 def parseORAddressLine(line):
     address = None
     portlist = None
+    line = line.split()
+    # Contains transport type in line[0]
+    if len(line) > 1:
+        line = line[1]
+    else:
+        line = line[0]
     # try regexp to discover ip version
     for regex in [re_ipv4, re_ipv6]:
         m = regex.match(line)
@@ -605,6 +611,76 @@ def parseCountryBlockFile(f):
         if ID and address and portlist and countries:
             yield ID, address, portlist, countries
 
+# Order the list of bridges such that some prefix satisfies a requirement
+# for certain pluggable transports
+def reorderBridgesByTransportRequirement(bridges, transports):
+    trans = {}
+    bridges2 = []
+
+    if not transports: return bridges
+
+    for tp,num,_ in transports:
+        trans[tp] = num
+    
+    for bridge in bridges:
+        for tpt in bridge.transports:
+            tp = tpt.methodname
+            if tp in trans and trans[tp] > 0:
+                bridges2.insert(0, bridge)
+                trans[tp] -= 1
+                break
+    for bridge in bridges:
+        if bridge not in bridges2:
+            bridges2.append(bridge)
+
+    return bridges2
+
+# Check that we are returning the specified number of transports
+# in this list of bridges
+def checkTransportRequirement(bridges, transports, remain):
+    trans = transports
+    types = {}
+    nontrans = []
+    n = len(bridges)
+
+    # We can't do anything even if we wanted to
+    if not trans: return bridges
+    if len(remain) == 0: return bridges
+
+    for tp,_,_ in trans:
+        types[tp] = 0
+    # Assess: Find how many bridges we have for each type
+    for bridge in bridges:
+        if bridge.transports is None:
+            nontrans.append(bridge)
+        for tpt in bridge.transports:
+            tp = tpt.methodname
+            if hasattr(types, tp):
+                types[tp] += 1
+    # Rectify: If we don't meet the requested minimum number of each type
+    # of bridge then try to find more in `remain' and add it to the list 
+    for_removal = []
+    for bridge in remain:
+        for tp,num,_ in trans:
+            if types[tp] < num:
+                for tpt in bridge.transports:
+                    if tp == tpt.methodname:
+                        bridges.append(bridge)
+                        for_removal.insert(0,bridge)
+                        types[tp] += 1
+                    if bridge in bridges:
+                        break
+            if bridge in bridges:
+                break
+    # Clean up
+    for b in for_removal:
+        remain.remove(b)
+    # If we have too many bridges now, try to remove any non-PT bridges
+    while len(bridges) > n and len(nontrans) > 0:
+        bridges.remove(nontrans.pop())
+
+    return reorderBridgesByTransportRequirement(bridges, transports)[:n]
+
 class BridgeHolder:
     """Abstract base class for all classes that hold bridges."""
     def insert(self, bridge):
@@ -621,7 +697,7 @@ class BridgeHolder:
 
 class BridgeRingParameters:
     """DOCDOC"""
-    def __init__(self, needPorts=(), needFlags=()):
+    def __init__(self, needPorts=(), needFlags=(), needTransports=()):
         """DOCDOC takes list of port, count"""
         for port,count in needPorts:
             if not (1 <= port <= 65535):
@@ -634,9 +710,18 @@ class BridgeRingParameters:
                 raise TypeError("Unsupported flag %s"%flag)
             if count <= 0:
                 raise TypeError("Count %s out of range."%count)
+        for trans,mincount,maxcount in needTransports:
+            if trans:
+                trans = trans.lower()
+            if mincount <= 0:
+                raise TypeError("Count %s out of range."%count)
+            if maxcount is not None and maxcount <= 0:
+                raise TypeError("Count %s out of range."%count)
 
         self.needPorts = needPorts[:]
         self.needFlags = [(flag.lower(),count) for flag, count in needFlags[:] ]
+        self.needTransports = [(trans.lower(), mincount, maxcount)
+	        for trans, mincount, maxcount in needTransports[:] ]
 
 class BridgeRing(BridgeHolder):
     """Arranges bridges in a ring based on an hmac function."""
@@ -743,16 +828,29 @@ class BridgeRing(BridgeHolder):
             forced.extend(subring._getBridgeKeysAt(pos, count))
 
         keys = [ ]
-        for k in forced + self._getBridgeKeysAt(pos, N):
+        # Let's grab a few extra, just in case
+        n = N * 3
+        for k in forced + self._getBridgeKeysAt(pos, n):
             if k not in keys:
                 keys.append(k)
+
+        discard = keys[N:]
+        discard.sort()
         keys = keys[:N]
         keys.sort()
 
         #Do not return bridges from the same /16
         bridges = [ self.bridges[k] for k in keys ]
+        remain  = [ self.bridges[k] for k in discard ]
 
-        return bridges
+        # Do we have transports?
+        trans = None
+        for name,_,_,subring in self.subrings:
+            if 'trans' == name:
+                trans = subrings
+                break
+
+        return checkTransportRequirement(bridges, trans, remain)
 
     def getBridgeByID(self, fp):
         """Return the bridge whose identity digest is fp, or None if no such

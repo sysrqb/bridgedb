@@ -139,7 +139,7 @@ class IPBasedDistributor(bridgedb.Bridges.BridgeHolder):
         area = self.areaMapper(ip)
 
         logging.info("area is %s" % area)
-        
+
         key1 = ''
         pos = 0
         n = self.nClusters
@@ -167,7 +167,7 @@ class IPBasedDistributor(bridgedb.Bridges.BridgeHolder):
             h = int( self.areaClusterHmac(area)[:8], 16)
             # length of numClusters
             clusterNum = h % self.nClusters
- 
+
             g = filterAssignBridgesToRing(self.splitter.hmac,
                                           self.nClusters +
                                           len(self.categories),
