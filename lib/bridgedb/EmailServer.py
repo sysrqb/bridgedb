@@ -169,9 +169,9 @@ def getMailResponse(lines, ctx):
     try:
         interval = ctx.schedule.getInterval(time.time())
         bridges = ctx.distributor.getBridgesForEmail(clientAddr,
-            interval, ctx.N,
-            countryCode=None,
-            bridgeFilterRules=bridgeFilterRules)
+                                                    interval, ctx.N,
+                                                   countryCode=None,
+                                bridgeFilterRules=bridgeFilterRules)
 
     # Handle rate limited email
     except TooSoonEmail, e:

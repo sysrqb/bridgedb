@@ -15,6 +15,7 @@ import socket
 import time
 import ipaddr
 import random
+from copy import deepcopy
 
 import bridgedb.Storage
 import bridgedb.Bucket
@@ -172,7 +173,6 @@ class Bridge:
             if transports:
                 pt = transports[pos % len(transports)]
                 return pt.getTransportLine(includeFingerprint)
-
         # filter addresses by address class
         addresses = filter(lambda x: isinstance(x[0], addressClass),
                 self.or_addresses.items())
@@ -422,6 +422,7 @@ re_ipv4 = re.compile("((?:\d{1,3}\.?){4}):(.*$)")
 def parseORAddressLine(line):
     address = None
     portlist = None
+
     # try regexp to discover ip version
     for regex in [re_ipv4, re_ipv6]:
         m = regex.match(line)
@@ -605,6 +606,175 @@ def parseCountryBlockFile(f):
         if ID and address and portlist and countries:
             yield ID, address, portlist, countries
 
+def reorderBridgesByTransportRequirement(bridges, transports):
+    """
+    Order the list of bridges such that some prefix satisfies a requirement
+    for returning certain pluggable transports.
+
+    Ex. If we're requested to return a list of bridges that contains at least
+    one x-type transport and one y-type transport, then reorder the current
+    list such that this requirement is satisfied as early as possible when
+    the list is traversed from the beginning.
+
+    This is accomplished by simply traversing the provided list of bridges
+    and adding bridges that satisfy the requirements to a second list until
+    we exhaust all the bridges. All remaining bridges are then appended to the
+    second list, the second list is then returned.
+
+    When we select a bridge to be added to the second list, we really make a
+    deepcopy of the bridge and add this copy to the list. We do this because we
+    have decided to select this bridge to satisfy a specific pluggable transport
+    requirement, therefore we should only use this bridge for that purpose. As
+    such, we modify the copy to only support the necessary transport.
+
+    :param list bridges: Proposed bridges to return to User
+    :param list transports: 3-tuple describing how many bridges per transport
+      we should return. e.g. (type, min, max)
+
+    :returns: list containing a permutation of **bridges**
+
+    XXX We should try to do better than greedy
+    """
+    trans = {}
+    bridges2 = []
+
+    if not transports: return bridges
+
+    for tp,minnum,maxnum in transports:
+        trans[tp] = [minnum, maxnum]
+    
+    for bridge in bridges:
+        logging.debug("Checking bridge %s", bridge.fingerprint)
+        for tpt in bridge.transports:
+            tp = tpt.methodname
+            logging.debug("Checking if we need a(n) %s transport", tp)
+            if tp in trans:
+                logging.debug("We still need %d %s bridges", trans[tp][0], tp)
+                if trans[tp][0] > 0:
+                    if len(bridge.transports) > 1:
+                        bridge2 = deepcopy(bridge)
+                        bridge2.transports = [
+                            PluggableTransport(bridge2, tp,
+                                               tpt.address, tpt.port)
+                        ]
+                    else:
+                        bridge2 = bridge
+                    logging.debug("Inserting %s's %s bridge",
+                                  bridge2.fingerprint, tp)
+		    assert len(bridge2.transports) == 1
+                    bridges2.insert(0, bridge2)
+                    trans[tp][0] -= 1
+                    if trans[tp][1]:
+                        trans[tp][1] -= 1
+                        assert trans[tp][0] <= trans[tp][1]
+                    break
+                elif trans[tp][1] and trans[tp][1] > 0:
+                    if len(bridge.transports) > 1:
+                        bridge2 = deepcopy(bridge)
+                        bridge2.transports = [
+                            PluggableTransport(bridge2, tp,
+                                               tpt.address, tpt.port)
+                        ]
+                    else:
+                        bridge2 = bridge
+                    logging.debug("Inserting %s's %s bridge",
+                                  bridge2.fingerprint, tp)
+		    assert len(bridge2.transports) == 1
+                    bridges2.insert(0, bridge2)
+                    trans[tp][1] -= 1
+                    break
+                continue
+
+    copied = False
+    num_not_copied = 0
+    for bridge in bridges:
+        for bridge2 in bridges2:
+            if bridge.fingerprint == bridge2.fingerprint:
+                copied = True
+                break
+        if not copied:
+            num_not_copied += 1
+            bridges2.append(bridge)
+        copied = False
+
+    assert len(bridges2) == len(bridges), "We're returning fewer bridges " \
+            "than we were given! Should be %d, but is %d. We appended %d" % \
+            (len(bridges), len(bridges2), num_not_copied)
+
+    return bridges2
+
+def checkTransportRequirement(bridges, trans, remain):
+    """
+    Called immediately prior to sending our response to a request.
+
+    Check that we are satisfying as many pluggable transports requirements
+    as is possible with the current set of bridges in 'bridges' and 'remain'.
+
+    :param list bridges: the currently proposed list of bridges to return to the user
+    :param list remain:  Excess bridges retrieved from the ring that may help us satisfy
+      transport requirements
+    :param list trans: 3-tuple describing how many bridges per transport
+      we should return. e.g. (type, min, max)
+
+    :returns: list of bridges
+
+    """
+    types = {}
+    nontrans = []
+
+    # 'bridges' is the maximum number of bridges we should return in the response,
+    # so this is the number of bridges we should also return
+    n = len(bridges)
+
+    # We can't do anything even if we wanted to
+    if not trans: return bridges
+    if len(remain) == 0: return bridges
+
+    for tp,_,_ in trans:
+        types[tp] = 0
+    # Assess: Find how many bridges we have for each type
+    for bridge in bridges:
+        if bridge.transports is None:
+            nontrans.append(bridge)
+        for tpt in bridge.transports:
+            tp = tpt.methodname
+            if hasattr(types, tp):
+                types[tp] += 1
+    # Rectify: If we don't meet the requested minimum number for each type
+    # of bridge then try to find more in `remain' and add it to the list 
+    # XXX Implement maxcount verification checks
+    used_list = []
+    for bridge in remain:
+        for tp,mincount,maxcount in trans:
+            if types[tp] < mincount:
+                for tpt in bridge.transports:
+                    if tp == tpt.methodname:
+                        if bridge in used_list:
+                            break
+                        logging.debug("Choosing %s for its %s transport",
+                                      bridge.fingerprint, tp)
+                        if len(bridge.transports) > 1:
+                            bridge2 = deepcopy(bridge)
+                            bridge2.transports = [
+                                PluggableTransport(bridge2, tp,
+                                                   tpt.address, tpt.port)
+                            ]
+                        else:
+                            bridge2 = bridge
+                        assert len(bridge2.transports) == 1
+                        bridges.append(bridge2)
+                        used_list.insert(0,bridge)
+                        types[tp] += 1
+                    if bridge in bridges:
+                        break
+            if bridge in bridges:
+                break
+
+    # Now let us try to rearrange the bridges we have in `bridges
+    # so that the first n bridges are some permuted subset such that
+    # they try to satisfy `trans`.
+    return reorderBridgesByTransportRequirement(bridges, trans)[:n]
+
 class BridgeHolder:
     """Abstract base class for all classes that hold bridges."""
     def insert(self, bridge):
@@ -620,8 +790,23 @@ class BridgeHolder:
         pass
 
 class BridgeRingParameters:
-    """DOCDOC"""
-    def __init__(self, needPorts=(), needFlags=()):
+    """
+    Specify requirements for the bridges we retrieve from rings
+
+    :param list needPorts: List of (port, count) pairs where port is
+        the ORPort number we should try to return and count is the
+        number of bridges we should try to return satisfying it.
+    :param list needFlags: List of (flags, count) pairs where
+        flags is a list of flags and count is the number of bridges
+        we should return satisfying the list.
+        NOTE: Currently we only support the "stable" flag.
+    :param list needTransports: List of (type, min, max) triplets
+        where type of the type of Pluggable Transport, min is the
+        minimum number of the given type that we should return, and
+        max is the maximum we should return.
+        NOTE: 0 <= min <= max or max == None
+    """
+    def __init__(self, needPorts=(), needFlags=(), needTransports=()):
         """DOCDOC takes list of port, count"""
         for port,count in needPorts:
             if not (1 <= port <= 65535):
@@ -634,9 +819,18 @@ class BridgeRingParameters:
                 raise TypeError("Unsupported flag %s"%flag)
             if count <= 0:
                 raise TypeError("Count %s out of range."%count)
+        for trans,mincount,maxcount in needTransports:
+            if trans:
+                trans = trans.lower()
+            if mincount < 0:
+                raise TypeError("Count %s out of range."%mincount)
+            if maxcount is not None and (maxcount <= 0 or maxcount < mincount):
+                raise TypeError("Count %s out of range."%maxcount)
 
         self.needPorts = needPorts[:]
         self.needFlags = [(flag.lower(),count) for flag, count in needFlags[:] ]
+        self.needTransports = [(trans.lower(), mincount, maxcount)
+	        for trans, mincount, maxcount in needTransports[:] ]
 
 class BridgeRing(BridgeHolder):
     """Arranges bridges in a ring based on an hmac function."""
@@ -664,6 +858,9 @@ class BridgeRing(BridgeHolder):
             self.subrings.append( ('port',port,count,BridgeRing(key,None)) )
         for flag,count in self.answerParameters.needFlags:
             self.subrings.append( ('flag',flag,count,BridgeRing(key,None)) )
+        for trans,mincount,maxcount in self.answerParameters.needTransports:
+            self.subrings.append( ('trans',trans,[mincount,maxcount],
+                                                     BridgeRing(key,None)) )
 
         self.setName("Ring")
 
@@ -695,6 +892,10 @@ class BridgeRing(BridgeHolder):
             if tp == 'port':
                 if val == bridge.orport:
                     subring.insert(bridge)
+            elif tp == 'trans':
+                # We need to verify all ring-types are valid.
+                # This is not where we handle PTs though
+                pass
             else:
                 assert tp == 'flag' and val == 'stable'
                 if val == 'stable' and bridge.stable:
@@ -743,16 +944,31 @@ class BridgeRing(BridgeHolder):
             forced.extend(subring._getBridgeKeysAt(pos, count))
 
         keys = [ ]
-        for k in forced + self._getBridgeKeysAt(pos, N):
+
+        # Let's grab a few extra bridges from the ring, just in case
+        # the first N bridges don't satisfy some of the PT requirements.
+        n = N * 3
+        for k in forced + self._getBridgeKeysAt(pos, n):
             if k not in keys:
                 keys.append(k)
+
+        discard = keys[N:]
+        discard.sort()
         keys = keys[:N]
         keys.sort()
 
         #Do not return bridges from the same /16
         bridges = [ self.bridges[k] for k in keys ]
+        remain  = [ self.bridges[k] for k in discard ]
 
-        return bridges
+        # Do we have transports?
+        trans = None
+        for name,_,_,subring in self.subrings:
+            if 'trans' == name:
+                trans = subring
+                break
+
+        return checkTransportRequirement(bridges, trans, remain)
 
     def getBridgeByID(self, fp):
         """Return the bridge whose identity digest is fp, or None if no such
