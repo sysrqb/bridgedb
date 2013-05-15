@@ -10,6 +10,7 @@ import tempfile
 import unittest
 import warnings
 import time
+import itertools
 from datetime import datetime
 
 import bridgedb.Bridges
@@ -164,6 +165,33 @@ def gettimestamp():
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     return "opt published %s\n" % ts
 
+def findORAddrSubstringInBridgeLine(line):
+    """ Find OR address and port/port list, return it """
+
+    v = False
+    if not line: return line
+    words = line.split()
+    if v:
+        print ''
+        print words
+        print words[0]
+	print "len(words)=%d" % len(words)
+        print ''
+    if words[0] == 'bridge':
+        if len(words) == 2:
+	    if v: print "Returning %s" % ' '.join(words[1:])
+            s = bridgedb.Bridges.parseORAddressLine(' '.join(words[1:]))
+            return s
+        else:
+	    if v: print "Returning %s" % ' '.join(words[2:])
+            s = bridgedb.Bridges.parseORAddressLine(' '.join(words[2:]))
+            return s
+    else:
+        if v: print "Returning empty string"
+        return ''
+    if v: print "Returning empty string, nothing"
+    return ''
+
 class RhymesWith255Category:
     def contains(self, ip):
         return ip.endswith(".255")
@@ -280,8 +308,8 @@ class IPBridgeDistTests(unittest.TestCase):
 
         for i in xrange(500):
             b = d.getBridgesForIP(randomIP4String(), "x", 1, bridgeFilterRules=[filterBridgesByIP6])
-            address, portlist = bridgedb.Bridges.parseORAddressLine(
-                    random.choice(b).getConfigLine(addressClass=ipaddr.IPv6Address)[7:])
+            address, portlist = findORAddrSubstringInBridgeLine(
+                    random.choice(b).getConfigLine(addressClass=ipaddr.IPv6Address))
             assert type(address) is ipaddr.IPv6Address
             assert filterBridgesByIP6(random.choice(b))
 
@@ -292,9 +320,10 @@ class IPBridgeDistTests(unittest.TestCase):
             d.insert(fakeBridge(or_addresses=True))
 
         for i in xrange(500):
-            b = d.getBridgesForIP(randomIP4String(), "x", 1, bridgeFilterRules=[filterBridgesByIP4])
-            address, portlist = bridgedb.Bridges.parseORAddressLine(
-                    random.choice(b).getConfigLine(addressClass=ipaddr.IPv4Address)[7:])
+            b = d.getBridgesForIP(randomIP4String(), "x", 1,
+                                  bridgeFilterRules=[filterBridgesByIP4])
+            address, portlist = findORAddrSubstringInBridgeLine(
+                    random.choice(b).getConfigLine(addressClass=ipaddr.IPv4Address))
             assert type(address) is ipaddr.IPv4Address
 
             assert filterBridgesByIP4(random.choice(b))
@@ -312,11 +341,11 @@ class IPBridgeDistTests(unittest.TestCase):
                 t = b.pop()
                 assert filterBridgesByIP4(t)
                 assert filterBridgesByIP6(t)
-                address, portlist = bridgedb.Bridges.parseORAddressLine(
-                    t.getConfigLine(addressClass=ipaddr.IPv4Address)[7:])
+                address, portlist = findORAddrSubstringInBridgeLine(
+                    t.getConfigLine(addressClass=ipaddr.IPv4Address))
                 assert type(address) is ipaddr.IPv4Address
-                address, portlist = bridgedb.Bridges.parseORAddressLine(
-                    t.getConfigLine(addressClass=ipaddr.IPv6Address)[7:])
+                address, portlist = findORAddrSubstringInBridgeLine(
+                    t.getConfigLine(addressClass=ipaddr.IPv6Address))
                 assert type(address) is ipaddr.IPv6Address
 
 
