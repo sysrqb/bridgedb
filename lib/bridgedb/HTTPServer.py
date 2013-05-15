@@ -193,10 +193,13 @@ class WebResource(twisted.web.resource.Resource):
                 rules.append(filterBridgesByNotBlockedIn(unblocked,
                     addressClass, transport))
 
-            bridges = self.distributor.getBridgesForIP(ip, interval,
-                                                       self.nBridgesToGive,
-                                                       countryCode,
-                                                       bridgeFilterRules=rules)
+            try:
+                bridges = self.distributor.getBridgesForIP(ip, interval,
+                                                           self.nBridgesToGive,
+                                                           countryCode,
+                                                           bridgeFilterRules=rules)
+            except bridgedb.Dist.InsufficientNumOfBridges, e:
+                bridges = e.bridges
 
         answer = None
         if bridges:

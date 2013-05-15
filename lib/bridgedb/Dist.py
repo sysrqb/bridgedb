@@ -31,14 +31,38 @@ def uniformMap(ip):
     else:
         return ".".join( ip.split(".")[:3] )
 
-def getNumBridgesPerAnswer(ring, max_bridges_per_answer=3):
-    if len(ring) < 20: n_bridges_per_answer = 1
-    if 20 <= len(ring) < 100: n_bridges_per_answer = min(2, max_bridges_per_answer)
-    if len(ring) >= 100: n_bridges_per_answer = max_bridges_per_answer
+def getNumBridgesPerAnswer(ring, max_bridges_per_answer=4):
+    if len(ring) < 20:
+        n_bridges_per_answer = 1
+        logging.debug("Returning %d bridges out of an expected %d" \
+                "from ring of len: %d" % \
+                (n_bridges_per_answer, max_bridges_per_answer, len(ring)))
+        raise InsufficientNumOfBridges(n_bridges_per_answer)
+    if 20 <= len(ring) < 100:
+        n_bridges_per_answer = min(2, max_bridges_per_answer)
+        logging.debug("Returning %d bridges out of an expected %d" \
+                "from ring of len: %d" % \
+                (n_bridges_per_answer, max_bridges_per_answer, len(ring)))
+        raise InsufficientNumOfBridges(n_bridges_per_answer)
+    if 100 <= len(ring) < 150:
+        n_bridges_per_answer = min(3, max_bridges_per_answer)
+        logging.debug("Returning %d bridges out of an expected %d" \
+                "from ring of len: %d" % \
+                (n_bridges_per_answer, max_bridges_per_answer, len(ring)))
+        raise InsufficientNumOfBridges(n_bridges_per_answer)
+    if len(ring) >= 150: n_bridges_per_answer = max_bridges_per_answer
 
     logging.debug("Returning %d bridges from ring of len: %d" % \
             (n_bridges_per_answer, len(ring)))
     return n_bridges_per_answer
+
+class InsufficientNumOfBridges(Exception):
+    """Exception raised when we don't know enough bridges for a request."""
+    def __init__(self, count, msgnum=None, bridges=None):
+        Exception.__init__(self, count, msgnum, bridges)
+        self.count = count
+        self.msgnum = msgnum
+        self.bridges = bridges
 
 class IPBasedDistributor(bridgedb.Bridges.BridgeHolder):
     """Object that hands out bridges based on the IP address of an incoming
@@ -192,11 +216,18 @@ class IPBasedDistributor(bridgedb.Bridges.BridgeHolder):
         else:
             logging.debug("Cache miss %s" % ruleset)
             ring = bridgedb.Bridges.BridgeRing(key1, self.answerParameters)
-            self.splitter.addRing(ring, ruleset, filterBridgesByRules(bridgeFilterRules),
+            self.splitter.addRing(ring, ruleset,
+                                  filterBridgesByRules(bridgeFilterRules),
                                   populate_from=self.splitter.bridges)
 
-        # get an appropriate number of bridges
-        return ring.getBridges(pos, getNumBridgesPerAnswer(ring, max_bridges_per_answer=N))
+        # get an appropriate number of bridges. If we don't know enough of them,
+        # return what we can and notify the caller
+        try:
+            bcount = getNumBridgesPerAnswer(ring, max_bridges_per_answer=N)
+            return ring.getBridges(pos, bcount)
+        except InsufficientNumOfBridges, e:
+            e.bridges = ring.getBridges(pos, e.count)
+            raise e
 
     def __len__(self):
         return len(self.splitter)
@@ -399,11 +430,15 @@ class EmailBasedDistributor(bridgedb.Bridges.BridgeHolder):
                                   filterBridgesByRules(bridgeFilterRules),
                                   populate_from=self.splitter.bridges)
 
-        result = ring.getBridges(pos, getNumBridgesPerAnswer(ring, max_bridges_per_answer=N))
-
         db.setEmailTime(emailaddress, now)
         db.commit()
-        return result
+
+        try:
+            bcount = getNumBridgesPerAnswer(ring, max_bridges_per_answer=N)
+            return ring.getBridges(pos, bcount)
+        except InsufficientNumOfBridges, e:
+            e.bridges = ring.getBridges(pos, e.count)
+            raise e
 
     def __len__(self):
         return len(self.splitter)
