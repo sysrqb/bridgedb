@@ -149,6 +149,27 @@ def fakeBridge6(orport=8080, running=True, stable=True, or_addresses=False,
 
     return b
 
+# Provide a bridge that probabilistically fits the current proportion of
+# regular to PT type. We currently assume 60% of available bridges are
+# regular bridges and the other 40% are a mix of PTs.
+def fakeBridgeWithBias(orport=8080, running=True, stable=True,
+        or_addresses=False):
+    return random.choice(list(itertools.repeat(fakeBridge(), 6)) +
+                     list(itertools.repeat(fakeBridge(transports=True), 4)))
+    """
+    return random.choice([fakeBridge(),
+                          fakeBridge(),
+                          fakeBridge(),
+                          fakeBridge(),
+                          fakeBridge(),
+                          fakeBridge(),
+                          fakeBridge(transports=True),
+                          fakeBridge(transports=True),
+                          fakeBridge(transports=True),
+                          fakeBridge(transports=True)])
+    """
+    
+
 def fake16Bridge(orport=8080, running=True, stable=True):
     nn = "bridge-%s"%random.randrange(0,1000000)
     ip = random16IP()
@@ -254,7 +275,7 @@ class IPBridgeDistTests(unittest.TestCase):
             f = lambda: ".".join([str(random.randrange(1,255)) for _ in xrange(4)])
             g = lambda: ".".join([str(random.randrange(1,255)) for _ in xrange(3)] + ['255'])
             n = d.getBridgesForIP(g(), "x", 10)
-            n2 = d.getBridgesForIP(f(), "x", 10) 
+            n2 = d.getBridgesForIP(f(), "x", 10)
 
             assert(len(n) > 0)
             assert(len(n2) > 0)
@@ -421,6 +442,56 @@ class IPBridgeDistTests(unittest.TestCase):
             b = d.getBridgesForIP(randomIPString(), "x", 1, bridgeFilterRules=[
                 filterBridgesByNotBlockedIn("us")])
             assert len(b) > 0
+
+    def testDistWithFilterTransport(self):
+        d = bridgedb.Dist.IPBasedDistributor(self.dumbAreaMapper, 3, "Foo")
+        for _ in xrange(250):
+            d.insert(fakeBridge(transports=True))
+            d.insert(fakeBridge(transports=False))
+
+        for i in xrange(500):
+            b = d.getBridgesForIP(randomIP4String(), "x", 1, bridgeFilterRules=[
+                filterBridgesByTransport(methodname='obfs')])
+            for br in b:
+                assert br.transports
+                assert True in [ t.methodname == 'obfs' for t in br.transports ]
+            br = random.choice(b)
+            if not br.transports:
+                address, portlist = findORAddrSubstringInBridgeLine(
+                        br.getConfigLine(addressClass=ipaddr.IPv4Address))
+            else:
+                address, portlist = findORAddrSubstringInBridgeLine(
+                        br.getConfigLine(addressClass=ipaddr.IPv4Address))
+            assert type(address) is ipaddr.IPv4Address
+
+            assert filterBridgesByIP4(random.choice(b))
+
+    # If the ring has less than 100 bridges, we should catch an exception
+    def testNumBridgesPerAnswer(self):
+        ring = bridgedb.Bridges.BridgeRing("abcd")
+        [ ring.insert(fakeBridge()) for i in xrange(19) ]
+        assert bridgedb.Dist.getNumBridgesPerAnswer(ring, 4) == 1
+        [ ring.insert(fakeBridge()) for i in xrange(31) ]
+        assert bridgedb.Dist.getNumBridgesPerAnswer(ring, 4) == 2
+        [ ring.insert(fakeBridge()) for i in xrange(50) ]
+        assert bridgedb.Dist.getNumBridgesPerAnswer(ring, 4) == 3
+        [ ring.insert(fakeBridge()) for i in xrange(50) ]
+        assert bridgedb.Dist.getNumBridgesPerAnswer(ring, 4) == 4
+
+    def testDistGetBridgesForIP(self):
+        forcePorts = [ (443, 1) ]
+        forceFlags = [ ("stable", 1) ]
+        forceTrans = [ ("obfs", 1, None), ("obfs2", 1, None) ]
+        ringParams=bridgedb.Bridges.BridgeRingParameters(needPorts=forcePorts,
+                                                needFlags=forceFlags,
+                                                needTransports=forceTrans)
+        d = bridgedb.Dist.IPBasedDistributor(self.dumbAreaMapper, 3, "Foo",
+                                             answerParameters=ringParams)
+        [ d.insert(fakeBridge()) for _ in xrange(256) ]
+        d.prepopulateRings()
+        assert len(d.getBridgesForIP("1.2.3.4", "dcba", 4)) == 2
+        [ d.insert(fakeBridge()) for _ in xrange(256) ]
+        assert len(d.getBridgesForIP("1.2.3.4", "dcba", 4)) == 4
 
 class DictStorageTests(unittest.TestCase):
     def setUp(self):
@@ -785,13 +856,156 @@ class BridgeStabilityTests(unittest.TestCase):
             b = db.getBridgeHistory(bridge.fingerprint)
             assert b is not None
 
+class PluggableTransportTests(unittest.TestCase):
+    def testMeetRequirementWithoutNonTrans(self):
+        """
+        Test that we return enough bridges when there are only
+        pluggable transports available 
+        """
+
+        N = 4
+        transports = [ ("obfs", 1, None), ("obfs2", 1, None) ]
+        num_bridges = 12
+        bridges = [ fakeBridge(transports=True) for x in xrange(num_bridges) ]
+        remain = bridges[N:]
+        bridges = bridges[:N]
+
+        assert len(bridges) == N
+
+        ret_bridges = bridgedb.Bridges.checkTransportRequirement(bridges, transports, remain)
+
+        assert len(ret_bridges) == N
+
+        for i in xrange(N):
+            assert ret_bridges[i] in bridges
+
+    def testMeetRequirementWithoutTrans(self):
+        """
+        Test that we return enough bridges when there are no
+        pluggable transports available 
+        """
+
+        N = 4
+        transports = [ ("obfs", 1, None), ("obfs2", 1, None) ]
+        num_bridges = 12
+        bridges = [ fakeBridge() for x in xrange(num_bridges) ]
+        remain = bridges[N:]
+        bridges = bridges[:N]
+
+        assert len(bridges) == N
+
+        ret_bridges = bridgedb.Bridges.checkTransportRequirement(bridges, transports, remain)
+
+        assert len(ret_bridges) == N
+
+        for i in xrange(N):
+            assert ret_bridges[i] in bridges
+
+    def testMeetRequirementWithMixedSet(self):
+        """
+        Test that we return enough bridges with transports when we
+        have a mix of pluggable transports and regular bridges available 
+        """
+
+        N = 4
+        transports = [ ("obfs", 1, None), ("obfs2", 1, None) ]
+        types = {}
+        num_bridges = 12
+        bridges = [ random.choice([fakeBridge(transports=True), fakeBridge()]) \
+                for i in xrange(num_bridges) ]
+        remain = bridges[N:]
+        bridges = bridges[:N]
+
+        assert len(bridges) == N
+
+        ret_bridges = bridgedb.Bridges.checkTransportRequirement(bridges, transports, remain)
+
+        assert len(ret_bridges) == N
+
+        for bridge in ret_bridges:
+            if not bridge.transports:
+                if 'reg' in types:
+                    types['reg'] += 1
+                else:
+                    types['reg'] = 1
+            else:
+                for tp,num,_ in transports:
+                    pt = {} 
+                    for transport in bridge.transports:
+                        if tp == transport.methodname:
+                            try:
+                                pt[tp] += 1
+                            except:
+                                pt[tp] = 1
+                    if tp in types:
+                        types[tp] += 1
+                    else:
+                        types[tp] = 2
+
+        for t in transports:
+            assert t[0] in types
+            assert types[t[0]] >= t[1]
+
+    # XXX This fails with non-negligible probability, but that's okay
+    def testMeetRequirementWithMixedSet2(self):
+        """
+        Test that we return enough bridges with transports when we
+        have a mix of pluggable transports and regular bridges available and
+        the bridges are proportionally 6:4 regular:PT bridges
+        """
+
+        N = 4
+        transports = [ ("obfs", 1, None), ("obfs2", 1, None) ]
+        types = {}
+        num_bridges = 12
+        bridges = [ fakeBridgeWithBias() for i in xrange(num_bridges) ]
+        remain = bridges[N:]
+        bridges = bridges[:N]
+
+        assert len(bridges) == N
+
+        ret_bridges = bridgedb.Bridges.checkTransportRequirement(bridges,
+                                                                 transports,
+                                                                 remain)
+
+        assert len(ret_bridges) == N
+
+        for bridge in ret_bridges:
+            if not bridge.transports:
+                if 'reg' in types:
+                    types['reg'] += 1
+                else:
+                    types['reg'] = 1
+            else:
+                for tp,num,_ in transports:
+                    pt = {} 
+                    for transport in bridge.transports:
+                        if tp == transport.methodname:
+                            try:
+                                pt[tp] += 1
+                            except:
+                                pt[tp] = 1
+                    if tp in types:
+                        types[tp] += 1
+                    else:
+                        types[tp] = 1
+
+        ptsum = 0
+        for i in types:
+            ptsum += types[i]
+        if 'reg' in types:
+            ptsum -= types['reg']
+        assert ptsum >= 3
+
 def testSuite():
     suite = unittest.TestSuite()
     loader = unittest.TestLoader()
 
     for klass in [ IPBridgeDistTests, DictStorageTests, SQLStorageTests,
-                  EmailBridgeDistTests, ParseDescFileTests, BridgeStabilityTests ]:
+                  EmailBridgeDistTests, ParseDescFileTests, BridgeStabilityTests,
+                  PluggableTransportTests ]:
         suite.addTest(loader.loadTestsFromTestCase(klass))
+    #suite.addTest(loader.loadTestsFromTestCase(PluggableTransportTests))
 
     for module in [ bridgedb.Bridges,
                     bridgedb.Main,
