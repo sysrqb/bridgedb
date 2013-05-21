@@ -58,7 +58,7 @@ def randomIPString():
 
 def random16IP():
     upper = "123.123." # same 16
-    lower = ".".join([str(random.randrange(1,256)) for _ in xrange(2)]) 
+    lower = ".".join([str(random.randrange(1,256)) for _ in xrange(2)])
     return upper+lower
 
 def randomPort():
@@ -168,13 +168,12 @@ def fakeBridgeWithBias(orport=8080, running=True, stable=True,
                           fakeBridge(transports=True),
                           fakeBridge(transports=True)])
     """
-    
 
 def fake16Bridge(orport=8080, running=True, stable=True):
     nn = "bridge-%s"%random.randrange(0,1000000)
     ip = random16IP()
     fp = "".join([random.choice("0123456789ABCDEF") for _ in xrange(40)])
-    b = bridgedb.Bridges.Bridge(nn,ip,orport,fingerprint=fp)  
+    b = bridgedb.Bridges.Bridge(nn,ip,orport,fingerprint=fp)
     b.setStatus(running, stable)
     return b
 
@@ -250,7 +249,7 @@ class EmailBridgeDistTests(unittest.TestCase):
         self.assertRaises(bridgedb.Dist.UnsupportedDomain,
                 bridgedb.Dist.normalizeEmail, 'bad@email.com',
                 {'example.com':'example.com'},
-                {'example.com':[]}) 
+                {'example.com':[]})
 
 class IPBridgeDistTests(unittest.TestCase):
     def dumbAreaMapper(self, ip):
@@ -319,7 +318,7 @@ class IPBridgeDistTests(unittest.TestCase):
     #        m = re.match(r'(\d+\.\d+)\.\d+\.\d+', bridge.ip)
     #        upper16 = m.group(1)
     #        self.assertTrue(upper16 not in slash16s)
-    #        slash16s[upper16] = True 
+    #        slash16s[upper16] = True
 
     def testDistWithFilterIP6(self):
         d = bridgedb.Dist.IPBasedDistributor(self.dumbAreaMapper, 3, "Foo")
@@ -644,7 +643,7 @@ class SQLStorageTests(unittest.TestCase):
         db.setWarnedEmail("def@example.com")
         self.assertEquals(db.getWarnedEmail("def@example.com"), True)
         db.cleanWarnedEmails(t+200)
-        self.assertEquals(db.getWarnedEmail("def@example.com"), False) 
+        self.assertEquals(db.getWarnedEmail("def@example.com"), False)
 
 class ParseDescFileTests(unittest.TestCase):
     def testSimpleDesc(self):
@@ -656,7 +655,7 @@ class ParseDescFileTests(unittest.TestCase):
             test+="router-signature\n"
 
         bs = [b for b in bridgedb.Bridges.parseDescFile(test.split('\n'))]
-        self.assertEquals(len(bs), 100) 
+        self.assertEquals(len(bs), 100)
 
         for b in bs:
             b.assertOK()
@@ -671,10 +670,10 @@ class ParseDescFileTests(unittest.TestCase):
             test+= "router-signature\n"
 
         bs = [b for b in bridgedb.Bridges.parseDescFile(test.split('\n'))]
-        self.assertEquals(len(bs), 100) 
+        self.assertEquals(len(bs), 100)
 
         for b in bs:
-            b.assertOK() 
+            b.assertOK()
 
     def testMultipleOrAddress(self):
         test = ""
@@ -686,10 +685,10 @@ class ParseDescFileTests(unittest.TestCase):
             test+= "router-signature\n"
 
         bs = [b for b in bridgedb.Bridges.parseDescFile(test.split('\n'))]
-        self.assertEquals(len(bs), 100) 
+        self.assertEquals(len(bs), 100)
 
         for b in bs:
-            b.assertOK()  
+            b.assertOK()
 
     def testConvolutedOrAddress(self):
         test = ""
@@ -701,10 +700,10 @@ class ParseDescFileTests(unittest.TestCase):
             test+= "router-signature\n"
 
         bs = [b for b in bridgedb.Bridges.parseDescFile(test.split('\n'))]
-        self.assertEquals(len(bs), 100) 
+        self.assertEquals(len(bs), 100)
 
         for b in bs:
-            b.assertOK()   
+            b.assertOK()
 
     def testParseCountryBlockFile(self):
         simpleBlock = "%s:%s %s\n"
@@ -830,7 +829,7 @@ class BridgeStabilityTests(unittest.TestCase):
 
         for b in running: assert b not in expired
 
-        # Solving: 
+        # Solving:
         # 1 discount event per 12 hours, 24 descriptors 30m apart
         num_successful = random.randint(2,60)
         # figure out how many intervals it will take for weightedUptime to
@@ -860,7 +859,7 @@ class PluggableTransportTests(unittest.TestCase):
     def testMeetRequirementWithoutNonTrans(self):
         """
         Test that we return enough bridges when there are only
-        pluggable transports available 
+        pluggable transports available
         """
 
         N = 4
@@ -882,7 +881,7 @@ class PluggableTransportTests(unittest.TestCase):
     def testMeetRequirementWithoutTrans(self):
         """
         Test that we return enough bridges when there are no
-        pluggable transports available 
+        pluggable transports available
         """
 
         N = 4
@@ -904,7 +903,7 @@ class PluggableTransportTests(unittest.TestCase):
     def testMeetRequirementWithMixedSet(self):
         """
         Test that we return enough bridges with transports when we
-        have a mix of pluggable transports and regular bridges available 
+        have a mix of pluggable transports and regular bridges available
         """
 
         N = 4
@@ -930,7 +929,7 @@ class PluggableTransportTests(unittest.TestCase):
                     types['reg'] = 1
             else:
                 for tp,num,_ in transports:
-                    pt = {} 
+                    pt = {}
                     for transport in bridge.transports:
                         if tp == transport.methodname:
                             try:
@@ -978,7 +977,7 @@ class PluggableTransportTests(unittest.TestCase):
                     types['reg'] = 1
             else:
                 for tp,num,_ in transports:
-                    pt = {} 
+                    pt = {}
                     for transport in bridge.transports:
                         if tp == transport.methodname:
                             try:
