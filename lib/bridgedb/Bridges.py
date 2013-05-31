@@ -739,7 +739,22 @@ class BridgeHolder:
         pass
 
 class BridgeRingParameters:
-    """DOCDOC"""
+    """
+    Specify requirements for the bridges we retrieve from rings
+
+    :param list needPorts: List of (port, count) pairs where port is
+        the ORPort number we should try to return and count is the
+        number of bridges we should try to return satisfying it.
+    :param list needFlags: List of (flags, count) pairs where
+        flags is a list of flags and count is the number of bridges
+        we should return satisfying the list.
+        NOTE: Currently we only support the "stable" flag.
+    :param list needTransports: List of (type, min, max) triplets
+        where type of the type of Pluggable Transport, min is the
+        minimum number of the given type that we should return, and
+        max is the maximum we should return.
+        NOTE: 0 <= min <= max or max == None
+    """
     def __init__(self, needPorts=(), needFlags=(), needTransports=()):
         """DOCDOC takes list of port, count"""
         for port,count in needPorts:
