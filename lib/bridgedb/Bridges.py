@@ -632,21 +632,29 @@ def reorderBridgesByTransportRequirement(bridges, transports):
 
     :returns: list containing a permutation of **bridges**
 
+    XXX We should try to do better than greedy
     """
     trans = {}
     bridges2 = []
 
     if not transports: return bridges
 
-    for tp,num,_ in transports:
-        trans[tp] = num
+    for tp,minnum,maxnum in transports:
+        trans[tp] = [minnum, maxnum]
     
     for bridge in bridges:
         for tpt in bridge.transports:
             tp = tpt.methodname
-            if tp in trans and trans[tp] > 0:
-                bridges2.insert(0, bridge)
-                trans[tp] -= 1
+            if tp in trans:
+                if trans[tp][0] > 0:
+                    bridges2.insert(0, bridge)
+                    trans[tp][0] -= 1
+                    if trans[tp][1]:
+                        trans[tp][1] -= 1
+                        assert trans[tp][0] <= trans[tp][1]
+                elif trans[tp][1] and trans[tp][1] > 0:
+                    bridges2.insert(0, bridge)
+                    trans[tp][1] -= 1
                 break
     for bridge in bridges:
         if bridge not in bridges2:
@@ -696,8 +704,8 @@ def checkTransportRequirement(bridges, trans, remain):
     # XXX Implement maxcount verification checks
     for_removal = []
     for bridge in remain:
-        for tp,num,_ in trans:
-            if types[tp] < num:
+        for tp,mincount,maxcount in trans:
+            if types[tp] < mincount:
                 for tpt in bridge.transports:
                     if tp == tpt.methodname:
                         bridges.append(bridge)
@@ -748,10 +756,10 @@ class BridgeRingParameters:
         for trans,mincount,maxcount in needTransports:
             if trans:
                 trans = trans.lower()
-            if mincount <= 0:
-                raise TypeError("Count %s out of range."%count)
-            if maxcount is not None and maxcount <= 0:
-                raise TypeError("Count %s out of range."%count)
+            if mincount < 0:
+                raise TypeError("Count %s out of range."%mincount)
+            if maxcount is not None and (maxcount <= 0 or maxcount < mincount):
+                raise TypeError("Count %s out of range."%maxcount)
 
         self.needPorts = needPorts[:]
         self.needFlags = [(flag.lower(),count) for flag, count in needFlags[:] ]
