@@ -807,6 +807,9 @@ class BridgeRing(BridgeHolder):
             self.subrings.append( ('port',port,count,BridgeRing(key,None)) )
         for flag,count in self.answerParameters.needFlags:
             self.subrings.append( ('flag',flag,count,BridgeRing(key,None)) )
+        for trans,mincount,maxcount in self.answerParameters.needTransports:
+            self.subrings.append( ('trans',trans,[mincount,maxcount],
+                                                     BridgeRing(key,None)) )
 
         self.setName("Ring")
 
@@ -838,6 +841,10 @@ class BridgeRing(BridgeHolder):
             if tp == 'port':
                 if val == bridge.orport:
                     subring.insert(bridge)
+            elif tp == 'trans':
+                # We need to verify all ring-types are valid.
+                # This is not where we handle PTs though
+                pass
             else:
                 assert tp == 'flag' and val == 'stable'
                 if val == 'stable' and bridge.stable:
@@ -907,7 +914,7 @@ class BridgeRing(BridgeHolder):
         trans = None
         for name,_,_,subring in self.subrings:
             if 'trans' == name:
-                trans = subrings
+                trans = subring
                 break
 
         return checkTransportRequirement(bridges, trans, remain)
