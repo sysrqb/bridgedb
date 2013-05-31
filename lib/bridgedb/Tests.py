@@ -1004,7 +1004,6 @@ def testSuite():
                   EmailBridgeDistTests, ParseDescFileTests, BridgeStabilityTests,
                   PluggableTransportTests ]:
         suite.addTest(loader.loadTestsFromTestCase(klass))
-    #suite.addTest(loader.loadTestsFromTestCase(PluggableTransportTests))
 
     for module in [ bridgedb.Bridges,
                     bridgedb.Main,
