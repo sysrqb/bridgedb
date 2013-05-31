@@ -994,7 +994,86 @@ class PluggableTransportTests(unittest.TestCase):
             ptsum += types[i]
         if 'reg' in types:
             ptsum -= types['reg']
-        assert ptsum >= 3
+        assert ptsum >= 3,"ptsum=%d, expected >= 3. Please rerun test."%ptsum
+
+    def testTransportsWithMaxLessThanMin(self):
+        """
+        Test that we assert when transport's max value is less than min value
+        """
+
+        N = 4
+        transports = [ ("obfs", 2, 1) ]
+        types = {}
+        num_bridges = 12
+        bridges = [ fakeBridgeWithBias() for i in xrange(num_bridges) ]
+        remain = bridges[N:]
+        bridges = bridges[:N]
+
+        assert len(bridges) == N
+
+        f = filterBridgesByTransport(methodname='obfs')
+	n = 0
+	for b in bridges:
+            if f(b):
+                n += 1
+
+	if n > 0:
+            with self.assertRaises(AssertionError) as cm:
+                bridgedb.Bridges.checkTransportRequirement(bridges,
+                                                           transports,
+                                                           remain)
+
+    # XXX This fails with non-negligible probability, but that's okay
+    def testMeetRequirementWithMixedSetAndMaxVal(self):
+        """
+        Test that we return enough bridges with transports when we
+        have a mix of pluggable transports and regular bridges available and
+        the bridges are proportionally 6:4 regular:PT bridges
+        """
+
+        N = 4
+        transports = [ ("obfs", 1, 2), ("obfs2", 1, None) ]
+        types = {}
+        num_bridges = 12
+        bridges = [ fakeBridgeWithBias() for i in xrange(num_bridges) ]
+        remain = bridges[N:]
+        bridges = bridges[:N]
+
+        assert len(bridges) == N
+
+        ret_bridges = bridgedb.Bridges.checkTransportRequirement(bridges,
+                                                                 transports,
+                                                                 remain)
+
+        assert len(ret_bridges) == N
+
+        for bridge in ret_bridges:
+            if not bridge.transports:
+                if 'reg' in types:
+                    types['reg'] += 1
+                else:
+                    types['reg'] = 1
+            else:
+                for tp,num,_ in transports:
+                    pt = {}
+                    for transport in bridge.transports:
+                        if tp == transport.methodname:
+                            try:
+                                pt[tp] += 1
+                            except:
+                                pt[tp] = 1
+                    if tp in types:
+                        types[tp] += 1
+                    else:
+                        types[tp] = 1
+
+        ptsum = 0
+        for i in types:
+            ptsum += types[i]
+        if 'reg' in types:
+            ptsum -= types['reg']
+        assert ptsum >= 3,"ptsum=%d, expected >= 3. Please rerun test."%ptsum
+
 
 def testSuite():
     suite = unittest.TestSuite()
