@@ -12,6 +12,7 @@ import warnings
 import time
 import itertools
 from datetime import datetime
+from copy import deepcopy
 
 import bridgedb.Bridges
 import bridgedb.Main
@@ -156,18 +157,6 @@ def fakeBridgeWithBias(orport=8080, running=True, stable=True,
         or_addresses=False):
     return random.choice(list(itertools.repeat(fakeBridge(), 6)) +
                      list(itertools.repeat(fakeBridge(transports=True), 4)))
-    """
-    return random.choice([fakeBridge(),
-                          fakeBridge(),
-                          fakeBridge(),
-                          fakeBridge(),
-                          fakeBridge(),
-                          fakeBridge(),
-                          fakeBridge(transports=True),
-                          fakeBridge(transports=True),
-                          fakeBridge(transports=True),
-                          fakeBridge(transports=True)])
-    """
 
 def fake16Bridge(orport=8080, running=True, stable=True):
     nn = "bridge-%s"%random.randrange(0,1000000)
@@ -188,28 +177,15 @@ def gettimestamp():
 def findORAddrSubstringInBridgeLine(line):
     """ Find OR address and port/port list, return it """
 
-    v = False
     if not line: return line
     words = line.split()
-    if v:
-        print ''
-        print words
-        print words[0]
-	print "len(words)=%d" % len(words)
-        print ''
     if words[0] == 'bridge':
         if len(words) == 2:
-	    if v: print "Returning %s" % ' '.join(words[1:])
             s = bridgedb.Bridges.parseORAddressLine(' '.join(words[1:]))
             return s
         else:
-	    if v: print "Returning %s" % ' '.join(words[2:])
             s = bridgedb.Bridges.parseORAddressLine(' '.join(words[2:]))
             return s
-    else:
-        if v: print "Returning empty string"
-        return ''
-    if v: print "Returning empty string, nothing"
     return ''
 
 class RhymesWith255Category:
@@ -876,7 +852,11 @@ class PluggableTransportTests(unittest.TestCase):
         assert len(ret_bridges) == N
 
         for i in xrange(N):
-            assert ret_bridges[i] in bridges
+            for bridge in bridges:
+                if ret_bridges[i].fingerprint == bridge.fingerprint:
+                    found = True
+            assert found
+            found = False
 
     def testMeetRequirementWithoutTrans(self):
         """
@@ -898,7 +878,11 @@ class PluggableTransportTests(unittest.TestCase):
         assert len(ret_bridges) == N
 
         for i in xrange(N):
-            assert ret_bridges[i] in bridges
+            for bridge in bridges:
+                if ret_bridges[i].fingerprint == bridge.fingerprint:
+                    found = True
+            assert found
+            found = False
 
     def testMeetRequirementWithMixedSet(self):
         """
@@ -942,10 +926,9 @@ class PluggableTransportTests(unittest.TestCase):
                         types[tp] = 2
 
         for t in transports:
-            assert t[0] in types
+            assert t[0] in types, "Looking for %s in %s" % (t[0], types)
             assert types[t[0]] >= t[1]
 
-    # XXX This fails with non-negligible probability, but that's okay
     def testMeetRequirementWithMixedSet2(self):
         """
         Test that we return enough bridges with transports when we
@@ -957,7 +940,8 @@ class PluggableTransportTests(unittest.TestCase):
         transports = [ ("obfs", 1, None), ("obfs2", 1, None) ]
         types = {}
         num_bridges = 12
-        bridges = [ fakeBridgeWithBias() for i in xrange(num_bridges) ]
+        bridges = [ fakeBridgeWithBias() for i in xrange(num_bridges - 3) ]
+        bridges += [ fakeBridge(transports=True) for i in xrange(3) ]
         remain = bridges[N:]
         bridges = bridges[:N]
 
@@ -992,9 +976,7 @@ class PluggableTransportTests(unittest.TestCase):
         ptsum = 0
         for i in types:
             ptsum += types[i]
-        if 'reg' in types:
-            ptsum -= types['reg']
-        assert ptsum >= 3,"ptsum=%d, expected >= 3. Please rerun test."%ptsum
+        assert ptsum >= 3, "ptsum = %d, expected >= 3." % ptsum
 
     def testTransportsWithMaxLessThanMin(self):
         """
@@ -1012,18 +994,17 @@ class PluggableTransportTests(unittest.TestCase):
         assert len(bridges) == N
 
         f = filterBridgesByTransport(methodname='obfs')
-	n = 0
-	for b in bridges:
+        n = 0
+        for b in bridges:
             if f(b):
                 n += 1
 
-	if n > 0:
+        if n > 0:
             with self.assertRaises(AssertionError) as cm:
                 bridgedb.Bridges.checkTransportRequirement(bridges,
                                                            transports,
                                                            remain)
 
-    # XXX This fails with non-negligible probability, but that's okay
     def testMeetRequirementWithMixedSetAndMaxVal(self):
         """
         Test that we return enough bridges with transports when we
@@ -1035,7 +1016,9 @@ class PluggableTransportTests(unittest.TestCase):
         transports = [ ("obfs", 1, 2), ("obfs2", 1, None) ]
         types = {}
         num_bridges = 12
-        bridges = [ fakeBridgeWithBias() for i in xrange(num_bridges) ]
+        
+        bridges = [ fakeBridgeWithBias() for i in xrange(num_bridges - 3) ]
+        bridges += [ fakeBridge(transports=True) for i in xrange(3) ]
         remain = bridges[N:]
         bridges = bridges[:N]
 
@@ -1070,10 +1053,68 @@ class PluggableTransportTests(unittest.TestCase):
         ptsum = 0
         for i in types:
             ptsum += types[i]
-        if 'reg' in types:
-            ptsum -= types['reg']
-        assert ptsum >= 3,"ptsum=%d, expected >= 3. Please rerun test."%ptsum
 
+        assert ptsum >= 3,"ptsum = %d, expected >= 3." % ptsum
+
+    def testReorderByTransRequirements(self):
+        """
+        Test that the list of bridges we return from
+        reorderBridgesByTransportRequirement() contains enough pluggable
+        transports such that it satisfies our requirements.
+
+        In this case, we check that the returned list contains at least one 'obfs'
+        transport and at least one 'obfs2' transport within the first four bridges
+        """
+
+        N = 4
+        transports = [ ("obfs", 1, 2), ("obfs2", 1, None) ]
+        types = {}
+        num_bridges = 9
+
+        # Let's guarantee we have at least one obfs PT
+        # and one obfs2 PT in the list
+        obfsBridge = fakeBridge()
+        obfsBridge.transports.append(
+                bridgedb.Bridges.PluggableTransport(obfsBridge,
+                "obfs", randomIP(), randomPort()))
+
+        obfs2Bridge = fakeBridge()
+        obfs2Bridge.transports.append(
+                bridgedb.Bridges.PluggableTransport(obfs2Bridge,
+                "obfs2", randomIP(), randomPort()))
+
+        obfs2Bridge2 = fakeBridge()
+        obfs2Bridge2.transports.append(
+                bridgedb.Bridges.PluggableTransport(obfs2Bridge2,
+                "obfs2", randomIP(), randomPort()))
+
+        bridges = [ fakeBridgeWithBias() for i in xrange(num_bridges) ]
+        bridges = bridges + [obfsBridge, obfs2Bridge, obfs2Bridge2]
+
+        ret_bridges = bridgedb.Bridges.reorderBridgesByTransportRequirement(bridges, transports)
+
+        assert ret_bridges
+        assert len(ret_bridges) == len(bridges), "Should be %d, but is %d" % (len(bridges), len(ret_bridges))
+
+        for tp,minnum,maxnum in transports:
+            types[tp] = [minnum, maxnum, None]
+        
+        index = 0
+        for b in ret_bridges:
+            for t in b.transports:
+                if index < 3:
+                    assert len(b.transports) == 1, "%s has %d transports"%(b.fingerprint, len(b.transports))
+                if t.methodname in types:
+                    tp = t.methodname
+                    if types[tp][0] != 0:
+                        types[tp][0] -= 1
+                        if types[tp][0] == 0:
+                            types[tp][2] = index
+            index += 1
+        for t in types:
+            assert types[t][0] == 0, "%s is at %d, should be 0" % (t, types[t][0])
+            assert types[t][2] != None
+            assert types[t][2] <= N
 
 def testSuite():
     suite = unittest.TestSuite()
