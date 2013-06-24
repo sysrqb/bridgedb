@@ -15,6 +15,7 @@ import socket
 import time
 import ipaddr
 import random
+from copy import deepcopy
 
 import bridgedb.Storage
 import bridgedb.Bucket
@@ -170,12 +171,6 @@ class Bridge:
             transports = filter(lambda x: isinstance(x.address, addressClass),
                     transports)
             if transports:
-                pt = transports[pos % len(transports)]
-                return pt.getTransportLine(includeFingerprint)
-        else:
-	    if self.transports:
-                transports = filter(lambda x: isinstance(x.address, addressClass),
-                        self.transports)
                 pt = transports[pos % len(transports)]
                 return pt.getTransportLine(includeFingerprint)
         # filter addresses by address class
@@ -626,6 +621,12 @@ def reorderBridgesByTransportRequirement(bridges, transports):
     we exhaust all the bridges. All remaining bridges are then appended to the
     second list, the second list is then returned.
 
+    When we select a bridge to be added to the second list, we really make a
+    deepcopy of the bridge and add this copy to the list. We do this because we
+    have decided to select this bridge to satisfy a specific pluggable transport
+    requirement, therefore we should only use this bridge for that purpose. As
+    such, we modify the copy to only support the necessary transport.
+
     :param list bridges: Proposed bridges to return to User
     :param list transports: 3-tuple describing how many bridges per transport
       we should return. e.g. (type, min, max)
@@ -643,22 +644,62 @@ def reorderBridgesByTransportRequirement(bridges, transports):
         trans[tp] = [minnum, maxnum]
     
     for bridge in bridges:
+        logging.debug("Checking bridge %s", bridge.fingerprint)
         for tpt in bridge.transports:
             tp = tpt.methodname
+            logging.debug("Checking if we need a(n) %s transport", tp)
             if tp in trans:
+                logging.debug("We still need %d %s bridges", trans[tp][0], tp)
                 if trans[tp][0] > 0:
-                    bridges2.insert(0, bridge)
+                    if len(bridge.transports) > 1:
+                        bridge2 = deepcopy(bridge)
+                        bridge2.transports = [
+                            PluggableTransport(bridge2, tp,
+                                               tpt.address, tpt.port)
+                        ]
+                    else:
+                        bridge2 = bridge
+                    logging.debug("Inserting %s's %s bridge",
+                                  bridge2.fingerprint, tp)
+		    assert len(bridge2.transports) == 1
+                    bridges2.insert(0, bridge2)
                     trans[tp][0] -= 1
                     if trans[tp][1]:
                         trans[tp][1] -= 1
                         assert trans[tp][0] <= trans[tp][1]
+                    break
                 elif trans[tp][1] and trans[tp][1] > 0:
-                    bridges2.insert(0, bridge)
+                    if len(bridge.transports) > 1:
+                        bridge2 = deepcopy(bridge)
+                        bridge2.transports = [
+                            PluggableTransport(bridge2, tp,
+                                               tpt.address, tpt.port)
+                        ]
+                    else:
+                        bridge2 = bridge
+                    logging.debug("Inserting %s's %s bridge",
+                                  bridge2.fingerprint, tp)
+		    assert len(bridge2.transports) == 1
+                    bridges2.insert(0, bridge2)
                     trans[tp][1] -= 1
-                break
+                    break
+                continue
+
+    copied = False
+    num_not_copied = 0
     for bridge in bridges:
-        if bridge not in bridges2:
+        for bridge2 in bridges2:
+            if bridge.fingerprint == bridge2.fingerprint:
+                copied = True
+                break
+        if not copied:
+            num_not_copied += 1
             bridges2.append(bridge)
+        copied = False
+
+    assert len(bridges2) == len(bridges), "We're returning fewer bridges " \
+            "than we were given! Should be %d, but is %d. We appended %d" % \
+            (len(bridges), len(bridges2), num_not_copied)
 
     return bridges2
 
@@ -702,26 +743,36 @@ def checkTransportRequirement(bridges, trans, remain):
     # Rectify: If we don't meet the requested minimum number for each type
     # of bridge then try to find more in `remain' and add it to the list 
     # XXX Implement maxcount verification checks
-    for_removal = []
+    used_list = []
     for bridge in remain:
         for tp,mincount,maxcount in trans:
             if types[tp] < mincount:
                 for tpt in bridge.transports:
                     if tp == tpt.methodname:
-                        bridges.append(bridge)
-                        for_removal.insert(0,bridge)
+                        if bridge in used_list:
+                            break
+                        logging.debug("Choosing %s for its %s transport",
+                                      bridge.fingerprint, tp)
+                        if len(bridge.transports) > 1:
+                            bridge2 = deepcopy(bridge)
+                            bridge2.transports = [
+                                PluggableTransport(bridge2, tp,
+                                                   tpt.address, tpt.port)
+                            ]
+                        else:
+                            bridge2 = bridge
+                        assert len(bridge2.transports) == 1
+                        bridges.append(bridge2)
+                        used_list.insert(0,bridge)
                         types[tp] += 1
                     if bridge in bridges:
                         break
             if bridge in bridges:
                 break
-    # Clean up
-    for b in for_removal:
-        remain.remove(b)
-    # If we have too many bridges now, try to remove any non-PT bridges
-    while len(bridges) > n and len(nontrans) > 0:
-        bridges.remove(nontrans.pop())
 
+    # Now let us try to rearrange the bridges we have in `bridges
+    # so that the first n bridges are some permuted subset such that
+    # they try to satisfy `trans`.
     return reorderBridgesByTransportRequirement(bridges, trans)[:n]
 
 class BridgeHolder:
