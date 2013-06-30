@@ -151,7 +151,13 @@ class WebResource(twisted.web.resource.Resource):
             countryCode = geoip.country_code_by_addr(ip)
 
         # set locale
-        setLocaleFromRequestHeader(request)
+        langs = setLocaleFromRequestHeader(request)
+        # Grab only the language (first two characters) so we know if we need
+        # to right-justify the text
+        langs = [ lang[:2] for lang in langs ]
+        rtl = False
+        if "ar" in langs or "fa" in langs:
+            rtl = True
 
         format = request.args.get("format", None)
         if format and len(format): format = format[0] # choose the first arg
@@ -216,13 +222,19 @@ class WebResource(twisted.web.resource.Resource):
             return answer
         else:
             request.setHeader("Content-Type", "text/html; charset=utf-8")
-            return lookup.get_template('bridges.html').render(answer=answer)
+            return lookup.get_template('bridges.html').render(answer=answer, rtl=rtl)
 
 class WebRoot(twisted.web.resource.Resource):
     isLeaf = True
     def render_GET(self, request):
-        setLocaleFromRequestHeader(request)
-        return lookup.get_template('index.html').render()
+        langs = setLocaleFromRequestHeader(request)
+        # Grab only the language (first two characters) so we know if we need
+        # to right-justify the text
+        langs = [ lang[:2] for lang in langs ]
+        rtl = False
+        if "ar" in langs or "fa" in langs:
+            rtl = True
+        return lookup.get_template('index.html').render(rtl=rtl)
 
 def addWebServer(cfg, dist, sched):
     """Set up a web server.
@@ -282,7 +294,7 @@ def setLocaleFromRequestHeader(request):
     localedir=os.path.join(os.path.dirname(__file__), 'i18n/')
 
     if langs:
-        langs = filter(lambda x: re.match('^[a-z\-]{1,5}$', x), langs)
+        langs = filter(lambda x: re.match('^[a-z\-]{1,5}', x), langs)
         logging.debug("Languages: %s" % langs)
         # add fallback languages
         langs_only = filter(lambda x: '-' in x, langs)
@@ -292,3 +304,4 @@ def setLocaleFromRequestHeader(request):
         lang = gettext.translation("bridgedb", localedir=localedir,
                  languages=langs, fallback=True)
         lang.install(True)
+    return langs
