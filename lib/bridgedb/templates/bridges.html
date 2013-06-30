@@ -8,8 +8,18 @@
 ${answer}
 </pre>
 <br />
-<p>${_("""To use the above lines, go to Vidalia's Network settings page, and click "My ISP blocks connections to the Tor network". Then add each bridge address one at a time.""")}
+% if rtl:
+<p style="float: right; text-align: right;">
+% else:
+<p>
+% endif
+${_("""To use the above lines, go to Vidalia's Network settings page, and click "My ISP blocks connections to the Tor network". Then add each bridge address one at a time.""")}
 </p>
 % else:
-<h3> ${_("No bridges currently available")} </h3>
+% if rtl:
+<h3 style="float: right; text-align: right;">
+% else:
+<h3 style="float: right; text-align: right;">
+% endif
+${_("No bridges currently available")} </h3>
 % endif

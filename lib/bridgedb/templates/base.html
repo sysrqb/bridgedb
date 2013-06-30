@@ -31,14 +31,36 @@ ${self.body()}
 <div class="faq">
   <div class="row-fluid marketing">
 
-    <h4>${_("What are bridges?")}</h4>
-    <p>${_("%s Bridge relays %s are Tor relays that help you circumvent "
+% if rtl:
+    <h4 style="float: right;">
+% else:
+    <h4>
+% endif
+    ${_("What are bridges?")}</h4>
+% if rtl:
+    <br><br>
+    <p style="float: right;">
+% else:
+    <p>
+% endif
+    ${_("%s Bridge relays %s are Tor relays that help you circumvent "
            "censorship.") % \
            ("""<a href="https://www.torproject.org/docs/bridges">""", "</a>")}
     </p>
 
-    <h4>${_("I need an alternative way of getting bridges!")}</h4>
-    <p>${_("Another way to find public bridge addresses is to send an email "
+% if rtl:
+    <h4 style="float: right;">
+% else:
+    <h4>
+% endif
+    ${_("I need an alternative way of getting bridges!")}</h4>
+% if rtl:
+    <br><br>
+    <p style="float: right; text-align: right;">
+% else:
+    <p>
+% endif
+    ${_("Another way to find public bridge addresses is to send an email "
            "(from a %s or a %s address) to %s with the line 'get bridges' by "
            "itself in the body of the mail.""") % \
             ("""<a href="https://mail.google.com/">gmail</a>""",
@@ -46,8 +68,19 @@ ${self.body()}
              """<a href="mailto:bridges@bridges.torproject.org">
              bridges@bridges.torproject.org</a>""")}</p>
 
-    <h4>${_("My bridges don't work! I need help!")}</h4>
-    <p>${_("If your Tor doesn't work, you should email %s. Try including as "
+% if rtl:
+    <h4 style="float: right;">
+% else:
+    <h4>
+% endif
+    ${_("My bridges don't work! I need help!")}</h4>
+% if rtl:
+    <br><br>
+    <p style="float: right; text-align: right;">
+% else:
+    <p>
+% endif
+    ${_("If your Tor doesn't work, you should email %s. Try including as "
            "much info about your case as you can, including the list of "
            "bridges you used, the bundle filename/version you used, the "
            "messages that Tor gave out, etc.") \
