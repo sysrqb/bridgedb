@@ -8,8 +8,11 @@
 ${answer}
 </pre>
 <br />
-<p>${_("""To use the above lines, go to Vidalia's Network settings page, and click "My ISP blocks connections to the Tor network". Then add each bridge address one at a time.""")}
+<p>${_("""To use the above bridge lines, go to Vidalia's Network settings page, and click "My ISP blocks connections to the Tor network". Then add each bridge address one at a time.""")}
 </p>
+<p>${_("Check Vidalia's Message Log: Click on the Advanced tab and if you see either of \"%sError parsing Bridge address%s\" or \"%sWe were supposed to connect to bridge 'x.x.x.x:y' using a pluggable transport%s\" then you must download the %s Pluggable Transports Tor Browser Bundle %s before you can use these bridges.") % ("""<span style="background-color: yellow;">""", "</span>", """<span style="background-color: yellow;">""", "</span>", """<a href="https://www.torproject.org/projects/obfsproxy.html.en#download" target="_blank">""", "</a>")}</p>
+<br />
+<p><em>${_("If you are not certain you downloaded the %s Pluggable Transports Tor Browser Bundle%s, please download it now and then add these bridges using the above instructions.") % ("""<a href="https://www.torproject.org/projects/obfsproxy.html.en#download" target="_blank">""", "</a>")}</em><p>
 % else:
 <h3> ${_("No bridges currently available")} </h3>
 % endif
