@@ -227,17 +227,23 @@ def load(cfg, splitter, clear=False):
     # XXX: should read from networkstatus after bridge-authority
     # does a reachability test
     if hasattr(cfg, "EXTRA_INFO_FILE"):
-        logging.info("Opening Extra Info document %s", os.path.abspath(cfg.EXTRA_INFO_FILE))
-        f = open(cfg.EXTRA_INFO_FILE, 'r')
-        for transport in Bridges.parseExtraInfoFile(f):
-            ID, method_name, address, port, argdict = transport
-            if bridges[ID].running:
-                logging.debug("  Appending transport to running bridge")
-                bridges[ID].transports.append(Bridges.PluggableTransport(bridges[ID],
-                    method_name, address, port, argdict))
-                assert bridges[ID].transports, "We added a transport but it disappeared!"
-        logging.debug("Closing extra-info document")
-        f.close()
+        for fname in cfg.EXTRA_INFO_FILE:
+            logging.info("Opening Extra Info document %s", os.path.abspath(fname))
+            try:
+                f = open(fname, 'r')
+                for transport in Bridges.parseExtraInfoFile(f):
+                    ID, method_name, address, port, argdict = transport
+                    if bridges[ID].running:
+                        logging.debug("  Appending transport to running bridge")
+                        bridges[ID].transports.append(
+                            Bridges.PluggableTransport(bridges[ID],
+                            method_name, address, port, argdict))
+                        assert bridges[ID].transports, "We added a transport but " \
+                                                       "it disappeared!"
+                logging.debug("Closing extra-info document")
+                f.close()
+            except IOError as e:
+                logging.warn("Failed to open %s: %s. Skipping.", os.path.abspath(fname), e.strerror)
     if hasattr(cfg, "COUNTRY_BLOCK_FILE"):
         logging.info("Opening Blocking Countries file %s", os.path.abspath(cfg.COUNTRY_BLOCK_FILE))
         f = open(cfg.COUNTRY_BLOCK_FILE, 'r')
