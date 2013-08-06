@@ -338,6 +338,14 @@ def parseDescFile(f, bridge_purpose='bridge'):
     nickname = ip = orport = fingerprint = purpose = None
     num_or_address_lines = 0
     or_addresses = {}
+    valid_lines = ("router", "bandwidth", "platform", "published",
+                   "fingerprint", "hibernating", "uptime", "onion-key",
+                   "ntor-onion-key", "signing-key", "accept", "reject",
+                   "ipv6-policy", "router-signature", "contact", "family",
+                   "read-history", "write-history", "eventdns",
+                   "caches-extra-info", "extra-info-digest",
+                   "hidden-service-dir", "protocols",
+                   "allow-single-hop-exits", "or-address")
 
     for line in f:
         line = line.strip()
@@ -348,12 +356,25 @@ def parseDescFile(f, bridge_purpose='bridge'):
             purpose = items[1]
         elif line.startswith("router "):
             items = line.split()
-            if len(items) >= 4:
+            if len(items) >= 6:
                 nickname = items[1]
                 ip = items[2].strip('[]')
-                orport = int(items[3])
+                try:
+                    orport = int(items[3])
+                except TypeError:
+                    logging.debug("  ORPort argument is not an int. "\
+                                  "Skipping descriptor.")
+                    purpose = "malformed"
+            else:
+                logging.debug("  Not enough arguments on router line. "\
+                              "Skipping descriptor.")
+                purpose = "malformed"
         elif line.startswith("fingerprint "):
             fingerprint = line[12:].replace(" ", "")
+            if is_valid_fingerprint(fingerprint):
+                logging.debug("  Parsed malformed fingerprint. "\
+                              "Skipping descriptor.")
+                purpose = "malformed"
         elif line.startswith("router-signature"):
             purposeMatches = (purpose == bridge_purpose or bridge_purpose is None)
             if purposeMatches and nickname and ip and orport and fingerprint:
@@ -361,6 +382,16 @@ def parseDescFile(f, bridge_purpose='bridge'):
                 b.assertOK()
                 yield b
             nickname = ip = orport = fingerprint = purpose = None 
+        else:
+            # Empty string
+            if not line:
+                continue
+            try:
+                if line.split()[0] in valid_lines:
+                    continue
+            except:
+                pass
+            logging.debug("  Parsed unrecognized descriptor line. Skipping.")
 
 class PortList:
     """ container class for port ranges
@@ -489,9 +520,26 @@ def parseExtraInfoFile(f):
             transport SP <methodname> SP <address:port> [SP arglist] NL
     """
 
+    valid_lines = ("extra-info", "published", "read-history", "write-history",
+                   "geoip-db-digest", "geoip6-db-digest", "geoip-start-time",
+                   "geoip-client-origins", "bridge-stats-end", "bridge-ips",
+                   "bridge-ip-versions", "dirreq-stats-end", "dirreq-v2-ips",
+                   "dirreq-v3-ips", "dirreq-v2-reqs", "dirreq-v3-reqs",
+                   "dirreq-v2-share", "dirreq-v3-share", "dirreq-v2-resp",
+                   "dirreq-v3-resp", "dirreq-v2-direct-dl",
+                   "dirreq-v3-direct-dl", "dirreq-v2-tunneled-dl",
+                   "dirreq-v3-tunneled-dl", "dirreq-read-history",
+                   "dirreq-write-history", "entry-stats-end", "entry-ips",
+                   "cell-stats-end", "cell-processed-cells",
+                   "cell-queued-cells", "cell-time-in-queue",
+                   "cell-circuits-per-decile", "conn-bi-direct",
+                   "exit-stats-end", "exit-kibibytes-written",
+                   "exit-kibibytes-read", "exit-streams-opened", "transport",
+                   "router-signature")
+
     ID = None
     for line in f:
-        line = line.strip()
+        line = line.strip().split()
 
         argdict = {}
 
@@ -500,34 +548,29 @@ def parseExtraInfoFile(f):
         #     line = line[4:]
 
         # get the bridge ID ?
-        if line.startswith("extra-info "): #XXX: get the router ID
+        if line[0] == "extra-info": #XXX: get the router ID
             logging.debug("Parsing extra-info line")
-            line = line[11:]
-            (nickname, ID) = line.split()
-            logging.debug("  Parsed Nickname: %s", nickname)
-            if is_valid_fingerprint(ID):
-                logging.debug("  Parsed fingerprint: %s", ID)
-                ID = fromHex(ID)
+            line = line.split()
+            if len(line) == 3:
+                nickname = line[1]
+                ID = line[2]
+                logging.debug("  Parsed Nickname: %s", nickname)
+                if is_valid_fingerprint(ID):
+                    logging.debug("  Parsed fingerprint: %s", ID)
+                    ID = fromHex(ID)
+                else:
+                    logging.debug("  Parsed invalid fingerprint: %s", ID)
+                    ID = None
             else:
-                logging.debug("  Parsed invalid fingerprint: %s", ID)
+                logging.debug("  Too few/many arguments on line. "\
+                              "Skipping document.")
+                ID = None
 
         # get the transport line
-        if ID and line.startswith("transport "):
+        if ID and line[0] == "transport ":
             logging.debug("  Parsing transport line")
-            fields = line[10:].split()
-            # [ arglist ] field, optional
-            if len(fields) >= 3:
-                arglist = fields[2:]
-                # parse arglist [k=v,...k=v] as argdict {k:v,...,k:v} 
-                argdict = {}
-                for arg in arglist:
-                    try: k,v = arg.split('=')
-                    except ValueError: continue
-                    argdict[k] = v
-                    logging.debug("  Parsing Argument: %s: %s", k, v)
-
             # get the required fields, method name and address
-            if len(fields) >= 2:
+            if len(line) >= 3:
                 # get the method name
                 # Method names must be C identifiers
                 for regex in [re_ipv4, re_ipv6]:
@@ -541,17 +584,36 @@ def parseExtraInfoFile(f):
                         yield ID, method_name, address, port, argdict
                     except (IndexError, ValueError, AttributeError):
                         # skip this line
+                        logging.debug("  Parsed malformed arguments. Skipping.")
                         continue
 
+            # [ arglist ] field, optional
+            if len(line) >= 4:
+                arglist = line[4:]
+                # parse arglist [k=v,...k=v] as argdict {k:v,...,k:v} 
+                argdict = {}
+                for arg in arglist:
+                    try: k,v = arg.split('=')
+                    except ValueError: continue
+                    argdict[k] = v
+                    logging.debug("  Parsing Argument: %s: %s", k, v)
+
+        elif line[0] in valid_lines:
+            continue
         # end of descriptor is defined how? 
-        if ID and line.startswith("router-signature"):
+        elif ID and line[0] == "router-signature":
             ID = None
+        else:
+            logging.debug("  Parsed unknown document line. Skipping.")
 
 def parseStatusFile(f):
     """DOCDOC"""
     timestamp = ID = None
     num_or_address_lines = 0
     or_addresses = {}
+
+    valid_lines = ("r", "a", "s", "v", "w", "p", "m")
+
     for line in f:
         if not ID:
             logging.debug("Parsing network status line")
@@ -560,18 +622,26 @@ def parseStatusFile(f):
             line = line[4:]
 
         if line.startswith("r "):
-            try:
-                ID = binascii.a2b_base64(line.split()[2]+"=")
-                timestamp = time.mktime(time.strptime(
-                    " ".join(line.split()[4:6]), "%Y-%m-%d %H:%M:%S")
+            if ID:
+                logging.debug("  Parsing r-line before expected s-line. "\
+                              "Skipping last status.")
+                ID = timestamp = None
+            if len(line) == 7:
+                try:
+                    line = split()
+                    ID = binascii.a2b_base64(line[2]+"=")
+                    timestamp = time.mktime(time.strptime(
+                        " ".join(line[4:6]), "%Y-%m-%d %H:%M:%S")
                     )
-                logging.debug("  Fingerprint: %s", toHex(ID))
-                logging.debug("  Timestamp: %s", timestamp)
-            except binascii.Error:
-                logging.warn("  Unparseable base64 ID %r", line.split()[2])
-            except ValueError:
-                timestamp = None
-                logging.debug("  Timestamp; Invalid")
+                    logging.debug("  Fingerprint: %s", toHex(ID))
+                    logging.debug("  Timestamp: %s", timestamp)
+                except binascii.Error:
+                    logging.warn("  Unparseable base64 ID %r", line[2])
+                except ValueError:
+                    timestamp = None
+                    logging.debug("  Timestamp; Invalid")
+            else:
+                logging.debug("  Too few/many arguments. Skipping")
 
         elif ID and line.startswith("a "):
             if num_or_address_lines < 8:
@@ -599,6 +669,10 @@ def parseStatusFile(f):
             logging.debug("  Total: %d OR address lines", num_or_address_lines)
             num_or_address_lines = 0
             or_addresses = {}
+        elif line[0] in valid_lines:
+            continue
+        else:
+            logging.debug("Parsed unknown Status line. Skipping.")
 
 def parseCountryBlockFile(f):
     """Generator. Parses a blocked-bridges file 'f', and yields
