@@ -37,6 +37,15 @@ ${self.body()}
            ("""<a href="https://www.torproject.org/docs/bridges">""", "</a>")}
     </p>
 
+    <h4>${_("What are pluggable transports?")}</h4>
+    <p>${_("%s Pluggable Transports %s are used with specific bridges to "
+           "help you circumvent censorship. They accomplish this by "
+           "transforming the network traffic between you and the bridge "
+           "so that a censor should not be able to detect that you are "
+           "using Tor.") % \
+           ("""<a href="https://www.torproject.org/docs/pluggable-transports.html.en">""", "</a>")}
+    </p>
+
     <h4>${_("I need an alternative way of getting bridges!")}</h4>
     <p>${_("Another way to find public bridge addresses is to send an email "
            "(from a %s or a %s address) to %s with the line 'get bridges' by "
